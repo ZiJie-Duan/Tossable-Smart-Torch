@@ -2,13 +2,14 @@ from machine import I2C
 from machine import Pin, PWM
 import time
 import mpu6050
+import math
 
 MPU_I2C_SCL = 22
 MPU_I2C_SDA = 21
 PWM_PIN = 17
 BUTM_PIN = 16
 
-PWM_FREQ = 50000 # 50kHz avoid flashing
+PWM_FREQ = 86000 # 50kHz avoid flashing
 PWM_DUTY = 0 # 0%
 DATA_BUFFER_LENGTH = 100  # filter data length
 DATA_FILTER_LENGTH = 25   # filter length, each time update 25 data
@@ -77,13 +78,30 @@ class TST:
 
     def action_analysis(self):
         pos = self.mpu.update_position() # get position info
-        print(pos)
+        #print(pos)
         if abs(pos) < 50: # avoid shaking
             return 0
         else:
             # here transform the position to the duty cycle
             # lets them have the same scale
             return int((pos*16250)//3200)
+    
+    def custom_sigmoid(self, x):
+        # used to make the duty cycle change more smooth
+        k = 0.0007
+        x0 = 5000
+        return 3 / (1 + math.exp(-k * (x - x0))) + 0.2
+
+    def update_duty(self, duty):
+        duty = (duty * self.custom_sigmoid(self.last_duty))
+        self.now_duty = self.last_duty + duty
+        self.now_duty = int(self.now_duty)
+        print(self.now_duty)
+        if self.now_duty > 65535:
+            self.now_duty = 65535
+        elif self.now_duty < 0:
+            self.now_duty = 0
+        self.pwm.duty_u16(self.now_duty)
 
     def start(self):
         while True:
@@ -100,16 +118,11 @@ class TST:
                     pass
                 elif duty > 0:
                     print("up")
-                    self.now_duty = self.last_duty + duty
-                    if self.now_duty > 65535:
-                        self.now_duty = 65535
-                    self.pwm.duty_u16(self.now_duty)
+                    self.update_duty(duty)
                 elif duty < 0:
                     print("down")
-                    self.now_duty = self.last_duty + duty
-                    if self.now_duty < 0:
-                        self.now_duty = 0
-                    self.pwm.duty_u16(self.now_duty)
+                    self.update_duty(duty)
+
             else:
                 if self.last_control_flag == True:
                     # if the button is released at the first time
